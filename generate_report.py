@@ -9,6 +9,9 @@
 import json
 import os
 import sys
+import random
+import re
+import hashlib
 from datetime import datetime, timedelta
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -24,9 +27,15 @@ GETNOTE_CLIENT_ID = os.environ.get("GETNOTE_CLIENT_ID", "cli_3802f9db08b811f1976
 # Notion 数据库 ID
 DIARY_CENTER_DB = "4e6607f4-7140-4317-8fc9-d52102337869"  # 日记中心
 WEATHER_DB = "33e33b33-7f23-8185-a733-fbde3544a1dd"       # 天气记录
+FRAGMENT_DB = "11233b33-7f23-8024-9555-cb8de8c58e02"      # 碎片中心
 
 # 播客筛选阈值（秒）
 PODCAST_MIN_LISTEN_SECONDS = 600  # 10 分钟
+
+# 碎片回顾：优先选取的标签（有深度的内容）
+FRAGMENT_PRIORITY_TAGS = ["类别/领悟", "类别/思考", "类别/反思", "类别/困惑", "类别/灵感"]
+# 每日碎片回顾数量
+FRAGMENT_PICK_COUNT = 2
 
 
 # ============ Notion API ============
@@ -621,6 +630,102 @@ def build_insights_section(diary_props):
     return ""
 
 
+def build_fragment_reflection_section(date_str):
+    """从碎片中心随机挑选深度碎片，作为每日回顾"""
+    print(f"  🔍 正在从碎片中心选取回顾内容...")
+    
+    # 获取所有未删除的碎片
+    fragments = query_database(FRAGMENT_DB, {
+        "property": "删除",
+        "checkbox": {"does_not_equal": True}
+    })
+    
+    if not fragments:
+        print(f"  ⚠️ 碎片中心为空")
+        return ""
+    
+    # 解析碎片，提取标题、标签、创建时间
+    parsed = []
+    for f in fragments:
+        props = f["properties"]
+        title = get_title(props)
+        if not title:
+            continue
+        
+        tags = [t["name"] for t in props.get("Tags", {}).get("multi_select", [])]
+        created_raw = props.get("Created At", {}).get("date") or {}
+        created = created_raw.get("start", "") if isinstance(created_raw, dict) else ""
+        
+        # 计算优先级分数：有深度标签的排前面
+        priority = 0
+        for pt in FRAGMENT_PRIORITY_TAGS:
+            if pt in tags:
+                priority = 2
+                break
+        
+        parsed.append({
+            "title": title,
+            "tags": tags,
+            "created": created,
+            "priority": priority
+        })
+    
+    if not parsed:
+        return ""
+    
+    # 基于日期的伪随机，同一天选出来的相同
+    seed = int(hashlib.md5(date_str.encode()).hexdigest(), 16)
+    rng = random.Random(seed)
+    
+    # 优先从高优先级碎片中选
+    priority_items = [p for p in parsed if p["priority"] == 2]
+    other_items = [p for p in parsed if p["priority"] == 0]
+    
+    picked = []
+    rng.shuffle(priority_items)
+    rng.shuffle(other_items)
+    
+    # 先从高优先级中选
+    pick_from = priority_items + other_items
+    for item in pick_from:
+        if len(picked) >= FRAGMENT_PICK_COUNT:
+            break
+        # 避免选当天的碎片（如果碎片有日期的话）
+        if item["created"] and date_str in item["created"]:
+            continue
+        picked.append(item)
+    
+    if not picked:
+        return ""
+    
+    lines = ["## 💭 碎片回顾\n"]
+    lines.append("*过去的自己，写给现在的自己*\n")
+    
+    for p in picked:
+        # 取标签中类别/领悟、类别/思考等作为前缀
+        category_tag = ""
+        for tag in p["tags"]:
+            if tag.startswith("类别/"):
+                category_tag = tag.replace("类别/", "")
+                break
+            elif tag.startswith("领域/"):
+                category_tag = tag.replace("领域/", "")
+                break
+        
+        # 清理标题中的 #标签
+        clean_title = p["title"]
+        clean_title = re.sub(r'\s*#\S+', '', clean_title).strip()
+        
+        if category_tag:
+            lines.append(f"- **[{category_tag}]** {clean_title}")
+        else:
+            lines.append(f"- {clean_title}")
+    
+    lines.append("")
+    print(f"  ✅ 碎片回顾 ({len(picked)}条)")
+    return "\n".join(lines)
+
+
 # ============ 主流程 ============
 
 def generate_report(date_str=None):
@@ -768,6 +873,11 @@ def generate_report(date_str=None):
         block_section = "## 📝 页面笔记\n\n" + "\n\n".join(block_texts) + "\n"
         sections.append(block_section)
         print(f"  ✅ 页面笔记 ({len(block_texts)}段)")
+    
+    # 碎片回顾（放在最后，作为收尾）
+    s = build_fragment_reflection_section(date_str)
+    if s:
+        sections.append(s)
     
     full_report = "\n".join(sections)
     print(f"\n📊 报告生成完成，共 {len(full_report)} 字符")
