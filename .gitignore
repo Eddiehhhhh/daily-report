@@ -1,0 +1,15 @@
+# 日志文件
+*.log
+report_*.md
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/

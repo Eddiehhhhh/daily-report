@@ -1,0 +1,32 @@
+name: Daily Diary Report
+
+on:
+  schedule:
+    # 每天北京时间凌晨 2:00 运行 (UTC 18:00)
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    # 允许手动触发（可传入日期参数）
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Generate and send report
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          GETNOTE_API_KEY: ${{ secrets.GETNOTE_API_KEY }}
+          GETNOTE_CLIENT_ID: ${{ secrets.GETNOTE_CLIENT_ID }}
+        run: python generate_report.py
