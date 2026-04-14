@@ -1,9 +1,9 @@
 name: Daily Diary Report
 
 on:
-  schedule:
-    # 每天北京时间凌晨 2:00 运行 (UTC 18:00)
-    - cron: '0 18 * * *'
+  # schedule 已禁用
+  # schedule:
+  #   - cron: '0 18 * * *'
   workflow_dispatch:
     # 允许手动触发（可传入日期参数）
 
